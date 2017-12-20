@@ -1,8 +1,8 @@
 * **Status**: Proposal
 * **Authors**: Ivan Kelly
-* **Pull Request**: [ ]
-* **Mailing List discussion**:
-* **Tasks break down**:
+* **Top Level Issue **: https://github.com/apache/incubator-pulsar/issues/933
+* **Mailing List discussion**: http://mail-archives.apache.org/mod_mbox/incubator-pulsar-dev/201712.mbox/ajax/%3CCAJdLeK1_Sgoh_LtXwG0kFbw67ScsekziN6cQW25LC%3DzpeSa--Q%40mail.gmail.com%3E
+* **Tasks break down**: https://github.com/apache/incubator-pulsar/projects/5
 * **Prototype**: https://github.com/ivankelly/incubator-pulsar/tree/compaction-prototype
 
 ## Motivation
@@ -23,7 +23,13 @@ This command will kick off a compaction process which runs on the machine that t
 
 The Pulsar compaction mechanism is very similar to that of Kafka. The compactor will first iterate over the message of the topic from the start. For each key it finds it will keep a record of the latest occurance of that key. Once it gets to the end of the topic, it will create a BookKeeper ledger to store the compacted topic. It will iterate over the topic a second time. During the second iteration, it will check the key of each message. If the key matches the latest instance of that key or the message has no key, the message Id, metadata and payload is written to the compacted topic ledger. Once the second run reaches the end point of the first run, compaction terminates. The compacted topic ledger is sealed/closed, and the ID of the ledger is written to the metadata of the topic, along with the message ID of the last message compacted (we'll call this the compaction horizon).
 
-If compaction is enabled for the topic, the pulsar broker serving the topic will watch the metadata for changes to the compacted topic ledger ID. When a client requests to read a message, the ID of the message to read is compared to the compaction horizon. If the ID is higher than or equal to the horizon, nothing new happens. If the ID is lower than the compaction horizon, then the read is served from the compaction horizon. As the compacted topic ledger does not contain all messages, the specified ID may not exist. When reading from the compacted topic ledger, we do a binary search to find the first message with a ID greater or equal to the ID specified in the read request.
+Messages with an empty payload will be considered deleted, so if the last message for a key has an empty payload, that key will be excluded from the compacted ledger.
+
+If compaction is enabled for the topic, the pulsar broker serving the topic will watch the metadata for changes to the compacted topic ledger ID. When a client requests to read a message, and has enabled reads from compacted data, the ID of the message to read is compared to the compaction horizon. If the ID is higher than or equal to the horizon, nothing new happens. If the ID is lower than the compaction horizon, then the read is served from the compaction horizon. As the compacted topic ledger does not contain all messages, the specified ID may not exist. When reading from the compacted topic ledger, we do a binary search to find the first message with a ID greater or equal to the ID specified in the read request. Any messages which do not exist in the compacted topic ledger between the specified ID and the first message found, are messages which have been compacted away - there is another messages further along in the topic with the same key.
+
+If the reading client has not enabled reads from compacted data, it will read from the message backlog, even if a compacted ledger exists.
+
+Both reading and writing will have explicit configuration options for throttling in compaction.
 
 Compaction doesn't directly interact with message expiration. Once a topic is compacted, the backlog still exists. However, subscribers with cursors before the compaction horizon will move quickly through the backlog, so it will eventually get cleaned up as there'll be no subscribers.
 
